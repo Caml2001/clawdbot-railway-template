@@ -1383,6 +1383,30 @@ app.use(requireDashboardAuth, async (req, res) => {
     }
   }
 
+  // For /hooks/* use direct fetch instead of http-proxy (avoids body-stream consumed by express.json)
+  if (req.path.startsWith("/hooks")) {
+    try {
+      const url = `${GATEWAY_TARGET}${req.path}`;
+      const fetchRes = await fetch(url, {
+        method: req.method,
+        headers: {
+          "content-type": "application/json",
+          "authorization": req.headers.authorization || `Bearer ${OPENCLAW_GATEWAY_TOKEN}`,
+          "x-forwarded-for": req.headers["x-forwarded-for"] || req.ip || "",
+          "x-forwarded-host": req.headers.host || "",
+          "x-forwarded-proto": "https",
+        },
+        body: req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(req.body) : undefined,
+      });
+      const text = await fetchRes.text();
+      res.status(fetchRes.status).type("application/json").send(text);
+    } catch (err) {
+      console.error("[hooks proxy]", err);
+      res.status(502).type("text/plain").send("Gateway unavailable\n");
+    }
+    return;
+  }
+
   attachGatewayAuthHeader(req);
   return proxy.web(req, res, { target: GATEWAY_TARGET });
 });
